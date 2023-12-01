@@ -9,7 +9,8 @@
   Exp4 is a comparison of several semi-supervised federal learning methods.
 
 # Description of part of the code
-  getlabelindex(Y_full,n_classes,labelnum)  This method randomly selects labelnum tags by category from the Y_full. This method is used to split tagged data
+  getlabelindex(Y_full,n_classes,labelnum)  This method randomly selects labelnum tags by category from the Y_full. 
+  This method is used to split tagged data
   Labelnum can control the quantity of labeled data for each category （But they are no use in FFSL.py and FLUIDS.py）
   
   ProposedFLAECNN.py differs from FLUIDS.py and FFSL.py in:
@@ -18,4 +19,3 @@
 
   This simulates the ability of sub nodes to have data labeling, so ProposedFLAECNN can perform supervised training on each child node
 
-  labelnum 
