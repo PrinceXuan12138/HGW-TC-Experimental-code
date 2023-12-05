@@ -26,22 +26,22 @@ import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 
-
+#labels for the different dataset
 #LABELS=['douyin','iqiyi','jindong','kuaishou','qqmusic','qq','taobao','wangyiyunyinyue','wangzherongyao','weixin']
 LABELS=['chat','email','file','streaming','voip']
 root_path=''
-labelnum=1500  #每个类有标签的数据量
+labelnum=1500  # The amount of labeled data (per class)
 latent_dim = 39
-#每个模型的参数
-verbose, epochs, batch_size =2,5, 64
-numOfIterations=50    #全局训练轮数
-numOfClients=10   #子节点个数
-monitoring_filename= "./result/联邦学习AECNN_"+str(labelnum)+"label_性能监控.csv"
-performance_filename= "./result/联邦学习AECNN_"+str(labelnum)+"label_评价指标.csv"
-AEmodelLocation="./Models/FL_AE_"+str(numOfClients)+"_nodes.h5"
-CNNmodelLocation="./Models/FL_CNN_"+str(numOfClients)+"_nodes.h5"
 
-########CNN相关##########
+verbose, epochs, batch_size =2,5, 256   # Parameters for local training
+numOfIterations=50     #global epochs
+numOfClients=10    #num of sub nodes
+monitoring_filename= "./result/联邦学习AECNN_"+str(labelnum)+"label_性能监控.csv"  #Path of the performance monitoring record file
+performance_filename= "./result/联邦学习AECNN_"+str(labelnum)+"label_评价指标.csv" #Path of the performance  index record file
+AEmodelLocation="./Models/FL_AE_"+str(numOfClients)+"_nodes.h5"       #Path of the server model
+CNNmodelLocation="./Models/FL_CNN_"+str(numOfClients)+"_nodes.h5"     #Path of the server model
+
+########Define model##########
 def createDeepModel(inp_size,n_classes):
     #encoder
     input_shape=(inp_size,1)
@@ -100,10 +100,10 @@ def splitLabel(x_train,y_train):
     return  x_train_labeled,y_train_labeled,x_train_unlabeled
 
 
-#######深度学习相关######
+#######Deep learning related code######
 accList, precList, recallList, f1List = [], [], [], []
-deepAEModelAggWeights=[]
-deepCNNModelAggWeights=[]
+deepAEModelAggWeights=[]   # Store the model weights of each sub node for subsequent aggregation
+deepCNNModelAggWeights=[]  # Store the model weights of each sub node for subsequent aggregation
 firstClientFlag=True
 def trainInServer(model,x_train_labeled,y_train_labeled):
     model.compile(optimizer="adam",loss=["categorical_crossentropy","mse"],metrics=["accuracy"])
@@ -144,7 +144,7 @@ def updateClientsModels():
 
 
 
-############统计相关###########
+############Statistical parameter###########
 monitorheaders = ['stage','iterationNo','clientID','avg_GPU_mem','avg_GPU_load','avg_Memory_used','avg_cpu_used','used_time(us)']
 Globalmonitordirct={'stage':'','iterationNo':0,'clientID':0,'avg_GPU_mem':0,'avg_GPU_load':0,'avg_Memory_used':0,'avg_cpu_used':0,'used_time(us)':0}
 Globalmonitordirctrows=[]
@@ -152,7 +152,7 @@ Globalmonitordirctrows=[]
 performanceheaders=['stage','iterationNo','clientID','train_acc','val_acc','test_acc','classification_report']
 performancerdirct={'stage':'','iterationNo':0,'clientID':0,'train_acc':0,'val_acc':0,'test_acc':0,'classification_report':''}
 performancerdirctros=[]
-#代码性能监控
+#Code performance monitoring
 class Monitor(Thread):
     def __init__(self, delay,stage,iterationNo,clientID,process):
         super(Monitor, self).__init__()
@@ -199,46 +199,46 @@ class Monitor(Thread):
 
 
 if __name__ == '__main__':
-    #step1  加载数据集
+    #step1  load data
     dfDS = pd.read_csv(root_path+'./dataset/'+'ISCX_5class_each_normalized_cuttedfloefeature.csv')
     X_full = dfDS.iloc[:, 1:len(dfDS.columns)].values
     Y_full = dfDS["label"].values
     num_classes=len(set(Y_full))
     Y_full = tensorflow.keras.utils.to_categorical(Y_full, num_classes)
 
-    # FOR TEST SPLIT
+    # split data
     xServer, xClients, yServer, yClients = train_test_split(X_full, Y_full, test_size=0.90,random_state=523)
     print("yServer",yServer.shape)
     print("yClients",yClients.shape)
     xServer = np.expand_dims(xServer, axis=2)
 
-    #创建初始模型
+    #create initial model
     inp_size = xServer.shape[1]
     originautoencoder,originclassificationmodel =createDeepModel(inp_size,num_classes)
     originautoencoder.save(AEmodelLocation)
     originclassificationmodel.save(CNNmodelLocation)
 
-    # ----- 1. 训练初始模型 -----
+    # ----- 1. train initial model in at central server (not use in the paper)-----
     # x_train_labeled,y_train_labeled=splitLabel(xServer,yServer)
     # x_train_labeled = np.expand_dims(x_train_labeled, axis=2)
     # servermodel=initialtotalmodel
     #trainInServer(servermodel,x_train_labeled,y_train_labeled)
 
 
-    # ------- 2. 拆分子节点训练数据 ----------
+    # ------- 2. The training data is split according to the number of sub nodes ----------
     xClientsList=[]
     yClientsList=[]
     xClientsListLabel=[]
     xClientsListUnLabel=[]
     yClientsListLabel=[]
 
-    clientsAEModelList=[]
-    clientsCNNModelist=[]
+    clientsAEModelList=[]  #Store the model of the sub node
+    clientsCNNModelist=[]  #Store the model of the sub node
 
     clientDataInterval=len(xClients)//numOfClients
     lastLowerBound=0
 
-
+    #Split the data by number of sub nodes
     for clientID in range(numOfClients):
         xClientsList.append(xClients[lastLowerBound : lastLowerBound+clientDataInterval])
         yClientsList.append(yClients[lastLowerBound : lastLowerBound+clientDataInterval])
@@ -247,7 +247,7 @@ if __name__ == '__main__':
         clientsAEModelList.append(AEmodel)
         clientsCNNModelist.append(CNNmodel)
         lastLowerBound+=clientDataInterval
-
+    #Split the  labelled data by number of sub nodes
     for clientID in range(numOfClients):
         x_train_labeled,y_train_labeled,x_train_unlabeled=splitLabel(xClientsList[clientID],yClientsList[clientID])
         x_train_labeled = np.expand_dims(x_train_labeled, axis=2)
@@ -257,13 +257,17 @@ if __name__ == '__main__':
         yClientsListLabel.append(y_train_labeled)
 
 
-    # ------- 3. Update clients' model with intial server's deep-model ----------
+    # ------- 3. train process ----------
     start_time = time.time()
     process = psutil.Process(os.getpid())
 
     for iterationNo in range(1,numOfIterations+1):
+
+        # each global epoch
         print("**********************开始第：",iterationNo,"轮全局训练**********************")
+
         for clientID in range(numOfClients):
+            #each local epoch
             print("=====================开始训练第",clientID,"个子节点====================")
             monitor = Monitor(1,"子节点训练",iterationNo,clientID,process) #delay,stage,iterationNo,clientID,process
 
@@ -273,18 +277,18 @@ if __name__ == '__main__':
             subAEmodel.set_weights(clientsAEModelList[clientID].get_weights())
             subCNNmodel.set_weights(clientsCNNModelist[clientID].get_weights())
 
-            # 编译模型  #先训练encoder
+            # #Train the encoder first with unlabeled data
             subAEmodel.compile(loss='mse',optimizer='adam',metrics='mse')
-            subAEmodel.fit(xClientsListUnLabel[clientID], xClientsListUnLabel[clientID],  # 输入数据
+            subAEmodel.fit(xClientsListUnLabel[clientID], xClientsListUnLabel[clientID],
                            epochs=epochs,
                            shuffle=True,
                            validation_data=(xServer,xServer),
                            verbose=verbose)
-            #训练完把encoder的权重拼在cnn前面 接着训练
+            #After training, put the weight of the encoder in front of the cnn and then train with labeled data
             subCNNmodel.encoder.set_weights(subAEmodel.encoder.get_weights())
 
             subCNNmodel.compile(loss='categorical_crossentropy',optimizer='adam',metrics='accuracy')
-            history=subCNNmodel.fit(xClientsListLabel[clientID], yClientsListLabel[clientID],  # 输入数据
+            history=subCNNmodel.fit(xClientsListLabel[clientID], yClientsListLabel[clientID],
                             epochs=epochs,
                             batch_size=batch_size,
                             shuffle=True,
@@ -305,7 +309,7 @@ if __name__ == '__main__':
 
             clientAEWeight=subAEmodel.get_weights()
             clientCNNWeight=subCNNmodel.get_weights()
-
+            #Add the weights of the model for each sub node
             updateServerModel(clientAEWeight,clientCNNWeight)
             subCNNmodel.save("./Models/AECNNmodel/CNN_node_"+str(clientID)+".h5")
             subAEmodel.save("./Models/AECNNmodel/AE_node_"+str(clientID)+".h5")
@@ -315,13 +319,13 @@ if __name__ == '__main__':
         #Avarage all clients model
         print("=====================子节点训练完毕，开始聚合=====================")
         monitor = Monitor(1,"全局聚合",iterationNo,999999,process)
-        #先聚合AE的参数
+        #Average the weights that are accumulated in the for loop----- (FedAVG)
         for ind in range(len(deepAEModelAggWeights)):
             deepAEModelAggWeights[ind]/=numOfClients
         dw_last=originautoencoder.get_weights()
         for ind in range(len(deepAEModelAggWeights)):
             dw_last[ind]=deepAEModelAggWeights[ind]
-        #再聚合CNN的参数
+        #The weight of the resulting aggregate model is used as the weight of the new initial model
         originautoencoder.set_weights(dw_last)
         originautoencoder.save(AEmodelLocation)
         for ind in range(len(deepCNNModelAggWeights)):
@@ -329,10 +333,11 @@ if __name__ == '__main__':
         dw_last=originclassificationmodel.get_weights()
         for ind in range(len(deepCNNModelAggWeights)):
             dw_last[ind]=deepCNNModelAggWeights[ind]
+        #The weight of the resulting aggregate model is used as the weight of the new initial model
         originclassificationmodel.set_weights(dw_last)
         originclassificationmodel.save(CNNmodelLocation)
         monitor.stop()
-        #Update server's model
+
 
         # Servers model is updated, now it can be used again by the clients
         print("=====================聚合完毕，开始下发模型=====================")
@@ -342,7 +347,7 @@ if __name__ == '__main__':
         deepAEModelAggWeights.clear()
 
 
-    #全部训练完 开始验证
+    #Start verification after all training
     print("================训练全部结束，开始进行验证========================")
     ACC_list=[]
 

@@ -62,7 +62,7 @@ def define_discriminator(in_shape=(66,1), n_classes=10):
     #mlp
     fe = Flatten()(fe)
     fe = Dense(128,activation="relu",name='dense_1')(fe)
-    fe = Dropout(0,5)(fe)
+    fe = Dropout(0.5)(fe)
     fe = Dense(n_classes,name='dense_2')(fe)
     c_out_layer = Activation('softmax')(fe)
 

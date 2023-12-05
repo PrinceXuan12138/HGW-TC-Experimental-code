@@ -22,26 +22,22 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 
 
-
+#labels for the different dataset
 #LABELS=['douyin','iqiyi','jindong','kuaishou','qqmusic','qq','taobao','wangyiyunyinyue','wangzherongyao','weixin']
 LABELS=['chat','email','file','streaming','voip']
 root_path=''
-labelnum=500  #每个类有标签的数据量 (no use in this code)
 latent_dim = 39
-#每个模型的参数
-verbose, epochs, batch_size =1,5, 64
-numOfIterations=50    #全局训练轮数
-numOfClients=10  #子节点个数
-monitoring_filename= "./result/FFSL_"+str(labelnum)+"label_性能监控.csv"
-performance_filename= "./result/FFSL_"+str(labelnum)+"label_评价指标.csv"
-AEmodelLocation="./Models/FFSL_AE_"+str(numOfClients)+"_nodes.h5"
-ClassficationmodelLocation="./Models/FFSL_CF_"+str(numOfClients)+"_nodes.h5"
+verbose, epochs, batch_size =1,5, 64  # Parameters for local training
+numOfIterations=50    #global epochs
+numOfClients=10  #num of sub nodes
+monitoring_filename= "./result/FFSL_label_性能监控.csv"  #Path of the performance monitoring record file
+performance_filename= "./result/FFSL_label_评价指标.csv"  #Path of the performance  index record file
+AEmodelLocation="./Models/FFSL_AE_"+str(numOfClients)+"_nodes.h5"  #Path of the server model
+ClassficationmodelLocation="./Models/FFSL_CF_"+str(numOfClients)+"_nodes.h5" #Path of the server model
 
-#模型结构
+########Define model##########
 def createDeepModel(inp_size,n_classes):
     #encoder
-    # 定义模型结构
-    # encoder
     input_shape=(inp_size,1)
     input_e = Input(shape=input_shape)
     x =Convolution1D(64,3,padding="same",activation="relu",name='conv_1')(input_e)
@@ -84,14 +80,9 @@ def createDeepModel(inp_size,n_classes):
     return autoencoder,classificationmodel
 
 
-def splitLabel(x_train,y_train):
-    idxs_annot = np.random.choice(x_train.shape[0], labelnum)
-    x_train_labeled   = x_train[idxs_annot]
-    y_train_labeled   = y_train[idxs_annot]
-    return  x_train_labeled,y_train_labeled
 
 
-#######深度学习相关######
+#######Deep learning related code######
 
 def updateServerModel(clientModelWeight):
     global firstClientFlag
@@ -109,7 +100,7 @@ def updateClientsModels(originmodel,servermodel):
         m.set_weights(servermodel.get_weights())
         clientsModelList.append(m)
 
-############统计相关###########
+############Statistical parameter###########
 monitorheaders = ['stage','iterationNo','clientID','avg_GPU_mem','avg_GPU_load','avg_Memory_used','avg_cpu_used','used_time(us)']
 Globalmonitordirct={'stage':'','iterationNo':0,'clientID':0,'avg_GPU_mem':0,'avg_GPU_load':0,'avg_Memory_used':0,'avg_cpu_used':0,'used_time(us)':0}
 Globalmonitordirctrows=[]
@@ -119,7 +110,7 @@ performancerdirct={'stage':'','iterationNo':0,'clientID':0,'train_value':0,'val_
 performancerdirctros=[]
 
 
-#代码性能监控
+#Code performance monitoring
 class Monitor(Thread):
     def __init__(self, delay,stage,iterationNo,clientID,process):
         super(Monitor, self).__init__()
@@ -169,7 +160,7 @@ if __name__ == '__main__':
     accList, precList, recallList, f1List = [], [], [], []
     deepModelAggWeights=[]
     firstClientFlag=True
-    #step1  加载数据集
+    #step1  load data
     dfDS = pd.read_csv(root_path+'./dataset/'+'ISCX_5class_each_normalized_cuttedfloefeature.csv')
     X_full = dfDS.iloc[:, 1:len(dfDS.columns)].values
     Y_full = dfDS["label"].values
@@ -177,37 +168,38 @@ if __name__ == '__main__':
     Y_full = tensorflow.keras.utils.to_categorical(Y_full, num_classes)
 
 
-    # FOR TEST SPLIT
+    # split data
     xtest, xdata, ytest, ydata = train_test_split(X_full, Y_full, test_size=0.90,random_state=523)
-    #xtest 用来进行测试验证的数据 ytest是其对应的标签
-    #xdata 是用来训练的数据 ydata 是其对应的标签
+    # xtest is used for test verification ytest is its corresponding label.
+    # xdata is  used for training ydata is its corresponding label
     print("xtest",xtest.shape)
     print("xdata",xdata.shape)
 
     xServer, xClients, yServer, yClients = train_test_split(xdata, ydata, test_size=0.90,random_state=523)
-    #xServer 是服务器用来做有监督学习的数据 yServer 是服务器其对应的标签
-    #xClients 是其客户端做无监督学习的数据 yClients会被丢弃
-    #xServer = np.expand_dims(xServer, axis=2)
+
+    # xServer is the data used by the server for supervised learning. YServer is the corresponding label of the server.
+    # xClients is the data that its client does unsupervised learning yClients will be discarded
+
     print("xServer",xServer.shape)
     print("xClients",xClients.shape)
 
-    #创建初始模型
+    #create initial model
     inp_size = xServer.shape[1]
     originautoencoder,originclassificationmodel=createDeepModel(inp_size,num_classes)
     originautoencoder.save(AEmodelLocation)
     originclassificationmodel.save(ClassficationmodelLocation)
 
-    # ------- 2. 拆分子节点训练数据 ----------
+    # ------- 2. The training data is split according to the number of sub nodes ----------
     xClientsList=[]
     yClientsList=[]
     xClientsListLabel=[]
     yClientsListLabel=[]
 
-    clientsModelList=[]  #存放子节点权重的
+    clientsModelList=[]   #Store the model of the sub node
 
     clientDataInterval=len(xClients)//numOfClients
     lastLowerBound=0
-    #数据拆分
+    #Split the data by number of sub nodes
     for clientID in range(numOfClients):
         xClientsList.append(xClients[lastLowerBound : lastLowerBound+clientDataInterval])
         yClientsList.append(yClients[lastLowerBound : lastLowerBound+clientDataInterval])
@@ -216,34 +208,34 @@ if __name__ == '__main__':
         lastLowerBound+=clientDataInterval
 
     for clientID in range(numOfClients):
-        #由于FFSL 本地是无监督学习 因此此处不做 有标记数据的筛选 ，全部用于训练
+        # because FFSL is locally unsupervised learning, there is no filtering of tagged data here, all for training
         x_train_labeled,y_train_labeled=xClientsList[clientID],yClientsList[clientID]
-        #x_train_labeled = np.expand_dims(x_train_labeled, axis=2)
+
         xClientsListLabel.append(x_train_labeled)
         yClientsListLabel.append(y_train_labeled)
 
-    # ------- 3. Update clients' model with intial server's deep-model ----------
+    # ------- 3. train process ----------
     start_time = time.time()
     process = psutil.Process(os.getpid())
 
     for iterationNo in range(1,numOfIterations+1):
         print("**********************开始第：",iterationNo,"轮全局训练**********************")
-
+        # each global epoch
         if iterationNo==1:
-            #如果是第一轮训练 什么也不动
+            # if it's the first round of training, nothing moves.
             servermodel=originclassificationmodel
         else:
             monitor = Monitor(1,"全局有监督训练",iterationNo,999999,process) #delay,stage,iterationNo,clientID,process
             servermodel=originclassificationmodel
             servermodel.set_weights(load_model(ClassficationmodelLocation).get_weights())
 
-            #服务端有标记fine-tune
-            servermodel.encoder.trainable = False   #将编码器部分设置为不可训练
+            #The server uses labeled data fine-tune
+            servermodel.encoder.trainable = False  # Set encoder to untrainable
             servermodel.mlp.trainable = True
             servermodel.compile(loss='categorical_crossentropy',optimizer='adam',metrics='accuracy')
-            history=servermodel.fit(xServer, yServer,  # 输入数据
+            history=servermodel.fit(xServer, yServer,
                                     epochs=20,
-                                    batch_size=batch_size, # 批次大小为 32
+                                    batch_size=batch_size,
                                     validation_data=(xtest,ytest),
                                     verbose=verbose)
             servermodel.save(ClassficationmodelLocation, save_format='tf')
@@ -257,18 +249,18 @@ if __name__ == '__main__':
             performancerdirctros.append(performancerdirct.copy())
 
         for clientID in range(numOfClients):
+            #each local epoch
             print("=====================开始训练第",clientID,"个子节点====================")
             monitor = Monitor(1,"子节点训练",iterationNo,clientID,process) #delay,stage,iterationNo,clientID,process
-            #每个子节点获取模型结构
+            # Each sub node gets the model structure
             submodel=originautoencoder
-            #每个子节点获取上一轮的权重
+            #Each sub node gets the weight of the previous round
             submodel.set_weights(clientsModelList[clientID].get_weights())
 
-            # 本地节点无监督训练
+            # sub node unsupervised local training
             submodel.encoder.trainable = True
             submodel.compile(loss='mse',optimizer='adam',metrics='mse')
-            # 训练模型
-            history=submodel.fit(xClientsListLabel[clientID], xClientsListLabel[clientID],  # 输入数据
+            history=submodel.fit(xClientsListLabel[clientID], xClientsListLabel[clientID],
                                  epochs=epochs,
                                  batch_size=batch_size,
                                  validation_data=(xtest,xtest)
@@ -282,9 +274,10 @@ if __name__ == '__main__':
             performancerdirct['test_value']=history.history["val_mse"][-1]
             performancerdirctros.append(performancerdirct.copy())
 
-            #此处存储当前节点的权重
+            # The weight of the current node is stored here
             clientWeight=submodel.get_weights()
-            #更新全局无监督模型的权重
+            # Update the weights of the global unsupervised model
+            #Add the weights of the model for each sub node
             updateServerModel(clientWeight)
             submodel.save("./Models/FFSL/FFSL_node_"+str(clientID)+".h5")
             firstClientFlag=False
@@ -292,10 +285,13 @@ if __name__ == '__main__':
         #Avarage all clients model
         print("=====================子节点训练完毕，开始聚合=====================")
         monitor = Monitor(1,"全局聚合",iterationNo,999999,process) #delay,stage,iterationNo,clientID,process
-        #FED-AVG 对无监督的全局模型进行聚合
+
+        #Average the weights that are accumulated in the for loop----- (FedAVG)
+        #According to the paper, only unsupervised models are aggregated here
+
         for ind in range(len(deepModelAggWeights)):
             deepModelAggWeights[ind]/=numOfClients
-        #获取autoencoder的模型参数结构
+        #The weight of the resulting aggregate model is used as the weight of the new initial model
         dw_last=originautoencoder.get_weights()
         for ind in range(len(deepModelAggWeights)):
             dw_last[ind]=deepModelAggWeights[ind]
@@ -304,7 +300,8 @@ if __name__ == '__main__':
         globalautoencoder=originautoencoder
         globalautoencoder.set_weights(dw_last)
         globalautoencoder.save(AEmodelLocation)
-        #此处要把全局无监督模型的encoder权重给到全局有监督模型
+
+        # Here the encoder of the globally unsupervised model is weighted to the globally supervised model
         originclassificationmodel.encoder.set_weights(globalautoencoder.encoder.get_weights())
         originclassificationmodel.save(ClassficationmodelLocation)
         # Servers model is updated, now it can be used again by the clients
@@ -313,7 +310,7 @@ if __name__ == '__main__':
         firstClientFlag=True
         deepModelAggWeights.clear()
 
-    #全部训练完 开始验证
+    #Start verification after all training
     print("================训练全部结束，开始进行验证========================")
     ACC_list=[]
     nodemodel=originclassificationmodel

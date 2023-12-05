@@ -12,8 +12,8 @@ from tensorflow.keras.utils import to_categorical
 import numpy as np
 
 
-latent_dim = 39
-labelnum=4000
+latent_dim = 39  #The size of the hidden layer neurons
+labelnum=4000   #The amount of labeled data (per class)
 
 def getlabelindex(Y_full,n_classes,labelnum):
     Y_full=pd.DataFrame(Y_full)
@@ -33,11 +33,11 @@ def getlabelindex(Y_full,n_classes,labelnum):
 
 
 
-
+#labels for two datasets
 #LABELS=['Tiktok','iQiyi Video','Jindong Shopping','Snack Video','QQmusic','QQ','Taobao Shopping','NetEase Cloud Music','Arena Of Valor','WeChat']
 LABELS=['chat','email','file','streaming','voip']
 root_path=''
-#step1  加载数据集
+#step1  load data
 dfDS = pd.read_csv(root_path+'./dataset/'+'ISCX_5class_each_normalized_cuttedfloefeature.csv')
 X_full = dfDS.iloc[:, 1:len(dfDS.columns)].values
 Y_full = dfDS["label"].values
@@ -46,8 +46,8 @@ n_classes=len(set(Y_full))
 print("X_full",X_full.shape)
 print("n_classes",n_classes)
 
-# 定义模型结构
-# encoder
+# define model
+#encoder
 input_shape=(inp_size,1)
 input_e = Input(shape=input_shape)
 x =Convolution1D(64,3,padding="same",activation="relu",name='conv_1')(input_e)
@@ -98,64 +98,58 @@ totalmodel.classificationmodel=classificationmodel
 
 x_train, x_test, y_train, y_test= train_test_split(X_full, Y_full, test_size = 0.1,random_state=5)
 
-idxs_annot=getlabelindex(y_train,n_classes,labelnum) #每个类挑选有标签的个数
+idxs_annot=getlabelindex(y_train,n_classes,labelnum) #select the labeled data
 x_train_labeled   = x_train[idxs_annot]
 y_train_labeled   = y_train[idxs_annot]
 
 y_train_labeled = to_categorical(y_train_labeled)
 y_test = to_categorical(y_test)
 
-# totalmodel.compile(optimizer="adam",loss=["categorical_crossentropy","mse"],metrics=["accuracy"])
-# history=totalmodel.fit(x_train_labeled, [y_train_labeled,x_train_labeled],
-#           epochs=10,
-#           batch_size=128,
-#           shuffle=True,
-#           validation_data=(x_test, [y_test,x_test]))
 
-# 训练模型
-totalmodel.classificationmodel.cnn.trainable = False # 将编码器部分设置为不可训练
-# 编译模型
+
+# train data
+totalmodel.classificationmodel.cnn.trainable = False #  Set the encoder  to untrainable
+# compile
 totalmodel.autoencoder.compile(loss='mse',optimizer='adam',metrics='mse')
-totalmodel.autoencoder.fit(x_train, x_train,  # 输入数据
-                epochs=100, # 训练 10 轮
-                batch_size=128, # 批次大小为 32
+totalmodel.autoencoder.fit(x_train, x_train,
+                epochs=50,
+                batch_size=128,
                 validation_data=(x_test,x_test))
 
-totalmodel.classificationmodel.encoder.trainable = False # 将编码器部分设置为不可训练
+totalmodel.classificationmodel.encoder.trainable = False # Set the encoder to untrainable
 totalmodel.classificationmodel.cnn.trainable = True
 
 totalmodel.classificationmodel.compile(loss='categorical_crossentropy',optimizer='adam',metrics='accuracy')
-totalmodel.classificationmodel.fit(x_train_labeled, y_train_labeled,  # 输入数据
-                        epochs=100, # 训练 10 轮
-                        batch_size=128, # 批次大小为 32
+totalmodel.classificationmodel.fit(x_train_labeled, y_train_labeled,
+                        epochs=50,
+                        batch_size=128,
                         validation_data=(x_test,y_test))
 
 
+classificationmodel.save('./model/Proposed_classificationmodel.h5')
 
 
 
-
-#测试指标
+#evaluate
 totalmodel.compile(optimizer="adam",loss=["categorical_crossentropy","mse"],metrics=["accuracy"])
 scores = totalmodel.evaluate(x_test, [y_test,x_test], verbose=1)
 y_pred =totalmodel.classificationmodel.cnn.predict(encoder(x_test), batch_size=100)
 print("scores",scores)
 
-
+#draw conf_matrix
 # # for_10
 # from sklearn.metrics import confusion_matrix
 # conf_matrix = confusion_matrix(y_test.argmax(-1),y_pred.argmax(-1))
 # plt.figure(figsize=(20, 20))
-# # 绘制混淆矩阵热力图
+
 # sns.heatmap(conf_matrix, annot=True,  fmt='d', square=True, annot_kws={"fontsize":20})
 # plt.title('Confusion Matrix')
-# # 设置中文字体
+
 # plt.rcParams['font.sans-serif'] = 'simhei'
-# # 设置刻度标签
+
 # tick_marks = np.arange(len(LABELS))
 # plt.xticks(tick_marks, LABELS,rotation=45,fontsize=20)
 # plt.yticks(tick_marks, LABELS,rotation=45,fontsize=20)
-# # 设置轴标签
 # plt.title("Traffic Classification Confusion Matrix (AECNN method)",fontsize=30)
 # plt.xlabel('Predicted Label',fontsize=25)
 # plt.ylabel('True Label',fontsize=25)
@@ -167,22 +161,17 @@ print("scores",scores)
 from sklearn.metrics import confusion_matrix
 conf_matrix = confusion_matrix(y_test.argmax(-1),y_pred.argmax(-1))
 plt.figure(figsize=(20, 20))
-# 绘制混淆矩阵热力图
 sns.heatmap(conf_matrix, annot=True,  fmt='d', square=True, annot_kws={"fontsize":20})
 plt.title('Confusion Matrix')
-# 设置中文字体
 plt.rcParams['font.sans-serif'] = 'simhei'
-# 设置刻度标签
 tick_marks = np.arange(len(LABELS))
 plt.xticks(tick_marks, LABELS,rotation=45,fontsize=20)
 plt.yticks(tick_marks, LABELS,rotation=45,fontsize=20)
-# 设置轴标签
 plt.title("Traffic Classification Confusion Matrix (AECNN method)",fontsize=30)
 plt.xlabel('Predicted Label',fontsize=25)
 plt.ylabel('True Label',fontsize=25)
 plt.savefig('Confusion Matrix_proposed_6_{}.png'.format(labelnum),dpi=500)
 
-#评价指标
 report = classification_report(y_test.argmax(-1), y_pred.argmax(-1),target_names= LABELS,digits=4,output_dict=True)
 df = pd.DataFrame(report).transpose()
 df.to_csv("classification_report_Proposed_{}.csv".format(labelnum), index=True)

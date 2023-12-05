@@ -25,20 +25,20 @@ import GPUtil
 import csv
 from sklearn.metrics import classification_report
 
-
+#labels for the different dataset
 #LABELS=['douyin','iqiyi','jindong','kuaishou','qqmusic','qq','taobao','wangyiyunyinyue','wangzherongyao','weixin']
 LABELS=['chat','email','file','streaming','voip']
 root_path=''
-labelnum=500
-#每个模型的参数
-verbose, epochs, batch_size =0,5, 256
-numOfIterations=50    #全局训练轮数
-numOfClients=10   #子节点个数
-monitoring_filename= "./result/联邦学习CNN_"+str(labelnum)+"label_性能监控.csv"
-performance_filename= "./result/联邦学习CNN_"+str(labelnum)+"label_评价指标.csv"
-modelLocation="./Models/FL_CNN_"+str(numOfClients)+"_nodes.h5"
+labelnum=500  # #The amount of labeled data (per class)
 
-########CNN相关##########
+verbose, epochs, batch_size =0,5, 256  # Parameters for local training
+numOfIterations=50    #global epochs
+numOfClients=10   #num of sub nodes
+monitoring_filename= "./result/联邦学习CNN_"+str(labelnum)+"label_性能监控.csv" #Path of the performance monitoring record file
+performance_filename= "./result/联邦学习CNN_"+str(labelnum)+"label_评价指标.csv"  #Path of the performance  index record file
+modelLocation="./Models/FL_CNN_"+str(numOfClients)+"_nodes.h5"   #Path of the server model
+
+########Define model##########
 def createDeepModel():
 
     model=Sequential()
@@ -63,7 +63,7 @@ def splitLabel(x_train,y_train):
     y_train_labeled   = y_train[idxs_annot]
     return  x_train_labeled,y_train_labeled
 
-######联邦学习相关#########
+#######Deep learning related code######
 accList, precList, recallList, f1List = [], [], [], []
 deepModelAggWeights=[]
 firstClientFlag=True
@@ -89,7 +89,7 @@ def updateClientsModels():
         # m.set_weights(Globalmodel.get_weights())
         # clientsModelList.append(m)
 
-############统计相关###########
+############Statistical parameter###########
 monitorheaders = ['stage','iterationNo','clientID','avg_GPU_mem','avg_GPU_load','avg_Memory_used','avg_cpu_used','used_time(us)']
 Globalmonitordirct={'stage':'','iterationNo':0,'clientID':0,'avg_GPU_mem':0,'avg_GPU_load':0,'avg_Memory_used':0,'avg_cpu_used':0,'used_time(us)':0}
 Globalmonitordirctrows=[]
@@ -99,7 +99,7 @@ performancerdirct={'stage':'','iterationNo':0,'clientID':0,'train_acc':0,'val_ac
 performancerdirctros=[]
 
 
-#代码性能监控
+#Code performance monitoring
 class Monitor(Thread):
     def __init__(self, delay,stage,iterationNo,clientID,process):
         super(Monitor, self).__init__()
@@ -147,31 +147,31 @@ class Monitor(Thread):
 
 
 if __name__ == '__main__':
-    #step1  加载数据集
+    #step1  load data
     dfDS = pd.read_csv(root_path+'./dataset/'+'ISCX_5class_each_normalized_cuttedfloefeature.csv')
     X_full = dfDS.iloc[:, 1:len(dfDS.columns)].values
     Y_full = dfDS["label"].values
     num_classes=len(set(Y_full))
     Y_full = keras.utils.to_categorical(Y_full, num_classes)
 
-    # FOR TEST SPLIT
+    # split data
     xServer, xClients, yServer, yClients = train_test_split(X_full, Y_full, test_size=0.90,random_state=523)
     print("yServer",yServer.shape)
     print("yClients",yClients.shape)
     xServer = np.expand_dims(xServer, axis=2)
 
-    #创建初始模型
+    #create initial model
     inp_size = xServer.shape[1]
     deepModel=createDeepModel()
     deepModel.save(modelLocation)
 
-    # ----- 1. 训练初始模型 -----
+    # -----  1. train initial model in at central server (not use in the paper)- -----
     # x_train_labeled,y_train_labeled=splitLabel(xServer,yServer)
     # x_train_labeled = np.expand_dims(x_train_labeled, axis=2)
     # servermodel=initialmodel
     # trainInServer(servermodel,x_train_labeled,y_train_labeled)
 
-    # ------- 2. 拆分子节点训练数据 ----------
+    # -------  2. The training data is split according to the number of sub nodes ----------
     xClientsList=[]
     yClientsList=[]
     xClientsListLabel=[]
@@ -180,26 +180,29 @@ if __name__ == '__main__':
     clientsModelList=[]
     clientDataInterval=len(xClients)//numOfClients
     lastLowerBound=0
+    #Split the data by number of sub nodes
     for clientID in range(numOfClients):
         xClientsList.append(xClients[lastLowerBound : lastLowerBound+clientDataInterval])
         yClientsList.append(yClients[lastLowerBound : lastLowerBound+clientDataInterval])
         model=load_model(modelLocation)
         clientsModelList.append(model)
         lastLowerBound+=clientDataInterval
-
+    #Split the  labelled data by number of sub nodes
     for clientID in range(numOfClients):
         x_train_labeled,y_train_labeled=splitLabel(xClientsList[clientID],yClientsList[clientID])
         x_train_labeled = np.expand_dims(x_train_labeled, axis=2)
         xClientsListLabel.append(x_train_labeled)
         yClientsListLabel.append(y_train_labeled)
 
-    # ------- 3. Update clients' model with intial server's deep-model ----------
+    # ------- 3. train process ----------
     start_time = time.time()
     process = psutil.Process(os.getpid())
 
     for iterationNo in range(1,numOfIterations+1):
+        # each global epoch
         print("**********************开始第：",iterationNo,"轮全局训练**********************")
         for clientID in range(numOfClients):
+            #each local epoch
             print("=====================开始训练第",clientID,"个子节点====================")
             monitor = Monitor(1,"子节点训练",iterationNo,clientID,process) #delay,stage,iterationNo,clientID,process
             clientsModelList[clientID].compile(loss='categorical_crossentropy', optimizer='Adam', metrics=['accuracy'])
@@ -220,6 +223,7 @@ if __name__ == '__main__':
             performancerdirctros.append(performancerdirct.copy())
 
             clientWeight=clientsModelList[clientID].get_weights()
+            #Add the weights of the model for each sub node
             updateServerModel(clientsModelList[clientID], clientWeight)
             clientsModelList[clientID].save("./Models/CNNmodel/CNN_node_"+str(clientID)+".h5")
             firstClientFlag=False
@@ -241,7 +245,7 @@ if __name__ == '__main__':
         firstClientFlag=True
         deepModelAggWeights.clear()
 
-    #全部训练完 开始验证
+    #Start verification after all training
     print("================训练全部结束，开始进行验证========================")
     ACC_list=[]
     for clientID in range(numOfClients):
@@ -260,7 +264,7 @@ if __name__ == '__main__':
         performancerdirct['test_acc']=acc
         performancerdirct['classification_report']=report
         performancerdirctros.append(performancerdirct.copy())
-
+    #Start verification after all training
     print("==================================================")
     print("ACC AVG",np.mean(ACC_list))
     with open(monitoring_filename,'a+',newline='')as f:
